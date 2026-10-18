@@ -1,6 +1,6 @@
 # Mobiours Machine & AMMLang
 
-> [!INFO]
+> [!NOTE]
 原名为`Mobius Machine & MMLang`，但是Mobius Machine和MMLang都已经存在，故改名。
 
 
