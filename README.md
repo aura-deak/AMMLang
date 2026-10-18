@@ -51,7 +51,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 将 AMMLang 安装为全局命令，可在任何地方直接调用：
 
 ```bash
-git clone https://github.com/aura-deak/MMLang.git
+git clone https://github.com/aura-deak/AMMLang.git
 cd MMLang
 uv tool install --python-preference only-system .
 ```

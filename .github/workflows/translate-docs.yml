@@ -4,6 +4,8 @@ on:
   push:
     paths:
       - "doc/**"
+      - "scripts/translate_docs.py"
+      - ".github/workflows/translate-docs.yml"
   workflow_dispatch:
 
 permissions:
