@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -17,6 +18,8 @@ from pathlib import Path
 
 API_URL = "https://spark-api-open.xf-yun.com/v1/chat/completions"
 DEFAULT_MODEL = "lite"
+MAX_API_ATTEMPTS = 4
+RETRY_BASE_SECONDS = 2
 FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 FENCE_CLOSE_RE = re.compile(r"^ {0,3}(`+|~+)[ \t]*(?:\r?\n)?$")
 INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)", re.DOTALL)
@@ -67,6 +70,41 @@ def restore_markdown(text: str, protected: dict[str, str]) -> str:
     return text
 
 
+def request_spark(request: urllib.request.Request) -> dict:
+    for attempt in range(1, MAX_API_ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=180) as response:
+                result = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as error:
+            details = error.read().decode("utf-8", errors="replace")
+            if error.code not in (429, 500, 502, 503, 504) or attempt == MAX_API_ATTEMPTS:
+                raise RuntimeError(f"Spark API returned HTTP {error.code}: {details}") from error
+            failure = f"HTTP {error.code}: {details}"
+        except (urllib.error.URLError, TimeoutError) as error:
+            if attempt == MAX_API_ATTEMPTS:
+                reason = getattr(error, "reason", error)
+                raise RuntimeError(f"Could not reach Spark API after {attempt} attempts: {reason}") from error
+            failure = f"network error: {getattr(error, 'reason', error)}"
+        else:
+            error_code = str(result.get("code", "0"))
+            if error_code == "0":
+                return result
+            if error_code not in {"10300", "10007"} or attempt == MAX_API_ATTEMPTS:
+                raise RuntimeError(f"Spark API error: {result.get('message', result)}")
+            failure = f"API error {error_code}: {result.get('message', result)}"
+
+        delay = RETRY_BASE_SECONDS * (2 ** (attempt - 1))
+        print(
+            f"Spark API temporary failure ({failure}); retrying in {delay}s "
+            f"({attempt}/{MAX_API_ATTEMPTS - 1}).",
+            file=sys.stderr,
+            flush=True,
+        )
+        time.sleep(delay)
+
+    raise RuntimeError("Spark API request exhausted its retry attempts")
+
+
 def translate_text(text: str, api_password: str, model: str) -> str:
     masked, protected = protect_markdown(text)
     system_prompt = (
@@ -97,17 +135,7 @@ def translate_text(text: str, api_password: str, model: str) -> str:
         method="POST",
     )
 
-    try:
-        with urllib.request.urlopen(request, timeout=180) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as error:
-        details = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Spark API returned HTTP {error.code}: {details}") from error
-    except urllib.error.URLError as error:
-        raise RuntimeError(f"Could not reach Spark API: {error.reason}") from error
-
-    if result.get("code", 0) != 0:
-        raise RuntimeError(f"Spark API error: {result.get('message', result)}")
+    result = request_spark(request)
     try:
         translated = result["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as error:

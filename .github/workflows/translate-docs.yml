@@ -29,10 +29,11 @@ jobs:
         env:
           SPARK_API_PASSWORD: ${{ secrets.SPARK_API_PASSWORD }}
           SPARK_MODEL: lite
+          EVENT_BEFORE: ${{ github.event.before }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ -n "$EVENT_BEFORE" ] && [ "$EVENT_BEFORE" != "0000000000000000000000000000000000000000" ]; then
             python scripts/translate_docs.py \
-              --base-ref "${{ github.event.before }}" \
+              --base-ref "$EVENT_BEFORE" \
               --head-ref "$GITHUB_SHA"
           else
             python scripts/translate_docs.py
