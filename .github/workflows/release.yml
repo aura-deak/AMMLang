@@ -26,11 +26,44 @@ jobs:
             exit 1
           fi
 
-      - name: Create release with generated notes
+      - name: Collect commit messages
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mapfile -t TAGS < <(git tag --merged "$TAG" --sort=-version:refname --list 'v[0-9]*')
+          previous_tag=""
+          for ((index = 0; index < ${#TAGS[@]}; index++)); do
+            if [[ "${TAGS[$index]}" == "$TAG" ]]; then
+              next_index=$((index + 1))
+              if (( next_index < ${#TAGS[@]} )); then
+                previous_tag="${TAGS[$next_index]}"
+              fi
+              break
+            fi
+          done
+
+          notes_file="$RUNNER_TEMP/release-notes.md"
+          if [[ -n "$previous_tag" ]]; then
+            git log --no-merges --format='%s' "$previous_tag..$TAG" |
+              awk 'NF && !seen[$0]++ { print "- " $0 }' > "$notes_file"
+          else
+            git log --no-merges --format='%s' "$TAG" |
+              awk 'NF && !seen[$0]++ { print "- " $0 }' > "$notes_file"
+          fi
+
+          if [[ ! -s "$notes_file" ]]; then
+            printf '%s\n' '- Maintenance release.' > "$notes_file"
+          fi
+
+          echo "Release notes for $TAG:"
+          cat "$notes_file"
+
+      - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
           gh release create "$TAG" \
             --title "$TAG" \
-            --generate-notes
+            --notes-file "$RUNNER_TEMP/release-notes.md"
