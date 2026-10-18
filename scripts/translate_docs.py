@@ -28,7 +28,7 @@ def protect_markdown(text: str) -> tuple[str, dict[str, str]]:
     protected: dict[str, str] = {}
 
     def replace(value: str) -> str:
-        token = f"ZXQPROTECTED{len(protected):04d}QXZ"
+        token = f"`MMLANG_KEEP_{len(protected):04d}`"
         protected[token] = value
         return token
 
@@ -38,7 +38,7 @@ def protect_markdown(text: str) -> tuple[str, dict[str, str]]:
     while index < len(lines):
         opening = FENCE_OPEN_RE.match(lines[index])
         if opening is None:
-            masked_lines.append(lines[index])
+            masked_lines.append(INLINE_CODE_RE.sub(lambda match: replace(match.group(0)), lines[index]))
             index += 1
             continue
 
@@ -54,7 +54,6 @@ def protect_markdown(text: str) -> tuple[str, dict[str, str]]:
         masked_lines.append(replace("".join(block)))
 
     masked = "".join(masked_lines)
-    masked = INLINE_CODE_RE.sub(lambda match: replace(match.group(0)), masked)
     masked = LINK_TARGET_RE.sub(lambda match: replace(match.group("target")), masked)
     masked = URL_RE.sub(lambda match: replace(match.group(0)), masked)
     return masked, protected
@@ -159,6 +158,7 @@ def sync_paths(
             print(f"Removed {output_path}")
         elif source_path.suffix.lower() == ".md":
             source_text = source_path.read_text(encoding="utf-8")
+            print(f"Translating {source_path}", flush=True)
             translated = translate_text(source_text, api_password, model)
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_text(translated, encoding="utf-8")
