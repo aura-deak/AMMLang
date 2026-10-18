@@ -1,3 +1,5 @@
+[中文 README](/README.md) | [English README](/doc-en/README.md)
+
 # 演示程序
 
 ## 将混沌数据纸带所有的格子置零

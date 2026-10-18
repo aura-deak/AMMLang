@@ -1,3 +1,5 @@
+[中文 README](/README.md) | [English README](/doc-en/README.md)
+
 # 运行测试
 
 单元测试位于 `test/` 目录下，使用 Python 标准库 `unittest`，无需安装额外依赖。覆盖汇编器、执行器、全部 10 条指令及边界条件，共 60 个测试用例。

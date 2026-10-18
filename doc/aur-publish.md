@@ -1,3 +1,5 @@
+[中文 README](/README.md) | [English README](/doc-en/README.md)
+
 # AUR 自动发布
 
 本文档说明如何通过 GitHub Actions 将 MMLang 自动同步到 [AUR](https://aur.archlinux.org/packages/mmlang)。工作流只负责更新 `PKGBUILD` / `.SRCINFO` 并推送到 AUR，不在 CI 中构建二进制包。

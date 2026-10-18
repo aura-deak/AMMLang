@@ -1,3 +1,5 @@
+[中文 README](/README.md) | [English README](/doc-en/README.md)
+
 # 莫比奥尔斯机
 
 ## 纸带系统

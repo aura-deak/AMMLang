@@ -1,3 +1,6 @@
+[中文 README](/README.md) | [English README](/doc-en/README.md)
+
+
 # 自定义数据纸带
 
 编辑 `data_tape_maker.py`，修改 `make(dp)` 函数返回值即可改变初始数据纸带生成逻辑：

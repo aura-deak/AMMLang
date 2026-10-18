@@ -1,3 +1,5 @@
+[中文 README](/README.md) | [English README](/doc-en/README.md)
+
 # 工具链用法
 
 ## 安装

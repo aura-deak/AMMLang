@@ -1,0 +1,49 @@
+name: Translate documentation
+
+on:
+  push:
+    paths:
+      - "doc/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  translate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Translate changed documentation
+        env:
+          SPARK_API_PASSWORD: ${{ secrets.SPARK_API_PASSWORD }}
+          SPARK_MODEL: lite
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            python scripts/translate_docs.py \
+              --base-ref "${{ github.event.before }}" \
+              --head-ref "$GITHUB_SHA"
+          else
+            python scripts/translate_docs.py
+          fi
+
+      - name: Commit translated documentation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add doc-en
+          if git diff --cached --quiet; then
+            echo "No translated documentation changes to commit."
+            exit 0
+          fi
+          git commit -m "docs: update English translations"
+          git push
