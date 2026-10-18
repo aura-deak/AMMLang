@@ -129,6 +129,18 @@ def changed_paths(base_ref: str, head_ref: str) -> list[Path]:
     return [Path(name.decode("utf-8")) for name in output.split(b"\0") if name]
 
 
+def translation_paths(
+    source_root: Path, repository_root: Path, base_ref: str | None, head_ref: str | None
+) -> list[Path]:
+    if base_ref and head_ref and not base_ref.startswith("0" * 40):
+        paths = changed_paths(base_ref, head_ref)
+        if paths:
+            return paths
+        print("No changed files under doc/; translating all documentation.")
+
+    return [path.relative_to(repository_root) for path in source_root.rglob("*") if path.is_file()]
+
+
 def remove_empty_parents(path: Path, root: Path) -> None:
     parent = path.parent
     while parent != root:
@@ -188,10 +200,7 @@ def main() -> int:
     if bool(args.base_ref) != bool(args.head_ref):
         parser.error("--base-ref and --head-ref must be supplied together")
     try:
-        if args.base_ref and not args.base_ref.startswith("0" * 40):
-            paths = changed_paths(args.base_ref, args.head_ref)
-        else:
-            paths = [path.relative_to(repository_root) for path in source_root.rglob("*") if path.is_file()]
+        paths = translation_paths(source_root, repository_root, args.base_ref, args.head_ref)
         sync_paths(paths, source_root, output_root, password, model)
     except (OSError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
         print(error, file=sys.stderr)
