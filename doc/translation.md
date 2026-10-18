@@ -2,13 +2,13 @@
 
 # 文档翻译工作流
 
-当 `doc/` 目录中的文件发生提交变更时，GitHub Actions 会调用讯飞星火 HTTP API 翻译变更的 Markdown，并把图片等非 Markdown 文件同步到 `doc-en/`，保留原有的相对目录结构。
+当 `doc/` 目录中的文件发生提交变更时，GitHub Actions 会调用 Index-Translate 免费在线 API 翻译变更的 Markdown，并把图片等非 Markdown 文件同步到 `doc-en/`，保留原有的相对目录结构。每篇 Markdown 单独请求，调用间至少间隔 0.5 秒（最多每秒 2 次），并对临时服务错误进行重试。
 
-## 配置 API 密钥
+## 在线 API
 
-在 GitHub 仓库的 **Settings → Secrets and variables → Actions** 中添加 `SPARK_API_PASSWORD`，值为讯飞开放平台星火 HTTP 服务的 APIPassword。该密钥只在 Actions 环境中使用，不要写入仓库文件。
+工作流使用 Index-Translate 官方公开的 OpenAI 兼容接口 `https://index-translate.bilibili.com/v1/chat/completions`，默认模型为 `Index-Translate-35B-A3B`。该接口无需 API 密钥或 GPU，不需要配置 GitHub Actions Secret。模型关闭 thinking，输出预算为 8192 tokens。
 
-工作流默认使用 `lite` 模型。首次配置密钥后，可在 **Actions → Translate documentation → Run workflow** 手动运行一次，生成全部英文文档。
+首次运行或重新生成全部译文时，可在 **Actions → Translate documentation → Run workflow** 手动启动工作流。
 
 ## Markdown 导航链接
 

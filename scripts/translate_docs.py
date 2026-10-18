@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Translate Markdown documentation with the iFlytek Spark HTTP API."""
+"""Translate Markdown documentation with the Index-Translate public API."""
 
 from __future__ import annotations
 
@@ -16,15 +16,34 @@ import urllib.request
 from pathlib import Path
 
 
-API_URL = "https://spark-api-open.xf-yun.com/v1/chat/completions"
-DEFAULT_MODEL = "lite"
+API_URL = "https://index-translate.bilibili.com/v1/chat/completions"
+DEFAULT_MODEL = "Index-Translate-35B-A3B"
+MAX_OUTPUT_TOKENS = 8192
 MAX_API_ATTEMPTS = 4
+MAX_CONTENT_ATTEMPTS = 3
 RETRY_BASE_SECONDS = 2
+MIN_REQUEST_INTERVAL_SECONDS = 0.5
 FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 FENCE_CLOSE_RE = re.compile(r"^ {0,3}(`+|~+)[ \t]*(?:\r?\n)?$")
 INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)", re.DOTALL)
 LINK_TARGET_RE = re.compile(r"(?<=\]\()(?P<target><[^>\n]+>|[^)\s]+)")
 URL_RE = re.compile(r"https?://[^\s)>]+|mailto:[^\s)>]+")
+
+
+class RequestRateLimiter:
+    def __init__(self, interval: float = MIN_REQUEST_INTERVAL_SECONDS) -> None:
+        self.interval = interval
+        self.next_request_at = 0.0
+
+    def wait(self) -> None:
+        now = time.monotonic()
+        delay = self.next_request_at - now
+        if delay > 0:
+            time.sleep(delay)
+        self.next_request_at = max(now, self.next_request_at) + self.interval
+
+
+API_RATE_LIMITER = RequestRateLimiter()
 
 
 def protect_markdown(text: str) -> tuple[str, dict[str, str]]:
@@ -70,79 +89,108 @@ def restore_markdown(text: str, protected: dict[str, str]) -> str:
     return text
 
 
-def request_spark(request: urllib.request.Request) -> dict:
+def strip_think(text: str) -> str:
+    if "</think>" in text:
+        text = text.split("</think>", 1)[1]
+    return text.strip().removeprefix("<think>").strip()
+
+
+def request_translation_api(request: urllib.request.Request) -> dict:
     for attempt in range(1, MAX_API_ATTEMPTS + 1):
         try:
+            API_RATE_LIMITER.wait()
             with urllib.request.urlopen(request, timeout=180) as response:
                 result = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as error:
             details = error.read().decode("utf-8", errors="replace")
             if error.code not in (429, 500, 502, 503, 504) or attempt == MAX_API_ATTEMPTS:
-                raise RuntimeError(f"Spark API returned HTTP {error.code}: {details}") from error
+                raise RuntimeError(f"Index-Translate API returned HTTP {error.code}: {details}") from error
             failure = f"HTTP {error.code}: {details}"
         except (urllib.error.URLError, TimeoutError) as error:
             if attempt == MAX_API_ATTEMPTS:
                 reason = getattr(error, "reason", error)
-                raise RuntimeError(f"Could not reach Spark API after {attempt} attempts: {reason}") from error
+                raise RuntimeError(f"Could not reach Index-Translate API after {attempt} attempts: {reason}") from error
             failure = f"network error: {getattr(error, 'reason', error)}"
         else:
             error_code = str(result.get("code", "0"))
             if error_code == "0":
                 return result
             if error_code not in {"10300", "10007"} or attempt == MAX_API_ATTEMPTS:
-                raise RuntimeError(f"Spark API error: {result.get('message', result)}")
+                raise RuntimeError(f"Index-Translate API error: {result.get('message', result)}")
             failure = f"API error {error_code}: {result.get('message', result)}"
 
         delay = RETRY_BASE_SECONDS * (2 ** (attempt - 1))
         print(
-            f"Spark API temporary failure ({failure}); retrying in {delay}s "
+            f"Index-Translate API temporary failure ({failure}); retrying in {delay}s "
             f"({attempt}/{MAX_API_ATTEMPTS - 1}).",
             file=sys.stderr,
             flush=True,
         )
         time.sleep(delay)
 
-    raise RuntimeError("Spark API request exhausted its retry attempts")
+    raise RuntimeError("Index-Translate API request exhausted its retry attempts")
 
 
-def translate_text(text: str, api_password: str, model: str) -> str:
+def translate_text(text: str, model: str) -> str:
     masked, protected = protect_markdown(text)
-    system_prompt = (
+    base_system_prompt = (
         "Translate the supplied Chinese Markdown documentation into natural English. "
         "Return only the translated Markdown, with no explanation or outer code fence. "
         "Preserve every Markdown heading, list, table, admonition, line break, identifier, "
-        "and document structure. Do not translate or modify placeholder tokens; they mark "
-        "code, link targets, URLs, and other content that must remain exact."
+        "and document structure. Every MMLANG_KEEP token in backticks must appear exactly "
+        "once in your response, unchanged and in its original position. These tokens stand "
+        "for code, link targets, URLs, and other content that must remain exact."
     )
-    request_body = json.dumps(
-        {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": masked},
-            ],
-            "temperature": 0.2,
-            "stream": False,
-        }
-    ).encode("utf-8")
-    request = urllib.request.Request(
-        API_URL,
-        data=request_body,
-        headers={
-            "Authorization": f"Bearer {api_password}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
+    for content_attempt in range(1, MAX_CONTENT_ATTEMPTS + 1):
+        system_prompt = base_system_prompt
+        if content_attempt > 1:
+            system_prompt += (
+                " The previous response failed validation. Ensure all listed protected "
+                "tokens appear exactly once: " + ", ".join(protected)
+            )
+        request_body = json.dumps(
+            {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": masked},
+                ],
+                "temperature": 0.0,
+                "max_tokens": MAX_OUTPUT_TOKENS,
+                "stream": False,
+                "chat_template_kwargs": {"enable_thinking": False},
+            }
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            API_URL,
+            data=request_body,
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "Index-Translate-Client/1.0",
+            },
+            method="POST",
+        )
 
-    result = request_spark(request)
-    try:
-        translated = result["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as error:
-        raise RuntimeError(f"Unexpected Spark API response: {result}") from error
+        result = request_translation_api(request)
+        try:
+            translated = result["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as error:
+            raise RuntimeError(f"Unexpected Index-Translate API response: {result}") from error
 
-    restored = restore_markdown(translated.strip(), protected)
-    return restored.rstrip() + "\n"
+        try:
+            restored = restore_markdown(strip_think(translated), protected)
+        except ValueError as error:
+            if content_attempt == MAX_CONTENT_ATTEMPTS:
+                raise
+            print(
+                f"{error}; retrying this document ({content_attempt}/{MAX_CONTENT_ATTEMPTS - 1}).",
+                file=sys.stderr,
+                flush=True,
+            )
+            continue
+        return restored.rstrip() + "\n"
+
+    raise RuntimeError("Index-Translate translation failed content validation")
 
 
 def changed_paths(base_ref: str, head_ref: str) -> list[Path]:
@@ -184,7 +232,7 @@ def remove_empty_parents(path: Path, root: Path) -> None:
 
 
 def sync_paths(
-    paths: list[Path], source_root: Path, output_root: Path, api_password: str, model: str
+    paths: list[Path], source_root: Path, output_root: Path, model: str
 ) -> None:
     for relative_path in paths:
         if relative_path.is_absolute() or ".." in relative_path.parts or relative_path.parts[0] != "doc":
@@ -199,7 +247,7 @@ def sync_paths(
         elif source_path.suffix.lower() == ".md":
             source_text = source_path.read_text(encoding="utf-8")
             print(f"Translating {source_path}", flush=True)
-            translated = translate_text(source_text, api_password, model)
+            translated = translate_text(source_text, model)
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_text(translated, encoding="utf-8")
             print(f"Translated {source_path} -> {output_path}")
@@ -218,18 +266,13 @@ def main() -> int:
     repository_root = Path(__file__).resolve().parent.parent
     source_root = repository_root / "doc"
     output_root = repository_root / "doc-en"
-    password = os.environ.get("SPARK_API_PASSWORD", "")
-    model = os.environ.get("SPARK_MODEL", DEFAULT_MODEL)
-
-    if not password:
-        print("SPARK_API_PASSWORD is required (set it as a GitHub Actions secret).", file=sys.stderr)
-        return 2
+    model = os.environ.get("INDEX_TRANSLATE_MODEL", DEFAULT_MODEL)
 
     if bool(args.base_ref) != bool(args.head_ref):
         parser.error("--base-ref and --head-ref must be supplied together")
     try:
         paths = translation_paths(source_root, repository_root, args.base_ref, args.head_ref)
-        sync_paths(paths, source_root, output_root, password, model)
+        sync_paths(paths, source_root, output_root, model)
     except (OSError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
         print(error, file=sys.stderr)
         return 1

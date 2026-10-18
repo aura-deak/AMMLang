@@ -27,8 +27,7 @@ jobs:
 
       - name: Translate changed documentation
         env:
-          SPARK_API_PASSWORD: ${{ secrets.SPARK_API_PASSWORD }}
-          SPARK_MODEL: lite
+          INDEX_TRANSLATE_MODEL: Index-Translate-35B-A3B
           EVENT_BEFORE: ${{ github.event.before }}
         run: |
           if [ "$GITHUB_EVENT_NAME" = "push" ] && [ -n "$EVENT_BEFORE" ] && [ "$EVENT_BEFORE" != "0000000000000000000000000000000000000000" ]; then
